@@ -14,6 +14,9 @@ import type { BudgetLevel, BudgetEstimate } from '@/types';
 import { getTodayString } from '@/utils/dateUtils';
 import { useDebounce, useDebouncedCallback } from '@/hooks/useDebounce';
 
+const FORM_DEBOUNCE_MS = 300;
+const BUDGET_INPUT_DEBOUNCE_MS = 150;
+
 interface FormData {
   destination: string;
   startDate: string;
@@ -48,10 +51,23 @@ export const CreateTripPage: React.FC = () => {
   const [estimatedBudget, setEstimatedBudget] = useState<BudgetEstimate | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  const debouncedStartDate = useDebounce(formData.startDate, 300);
-  const debouncedEndDate = useDebounce(formData.endDate, 300);
-  const debouncedTravelers = useDebounce(formData.travelers, 300);
-  const debouncedBudgetLevel = useDebounce(formData.budgetLevel, 300);
+  const debouncedStartDate = useDebounce(formData.startDate, FORM_DEBOUNCE_MS);
+  const debouncedEndDate = useDebounce(formData.endDate, FORM_DEBOUNCE_MS);
+  const debouncedTravelers = useDebounce(formData.travelers, FORM_DEBOUNCE_MS);
+  const debouncedBudgetLevel = useDebounce(formData.budgetLevel, FORM_DEBOUNCE_MS);
+
+  const days = useMemo(
+    () =>
+      debouncedStartDate && debouncedEndDate
+        ? calculateDays(debouncedStartDate, debouncedEndDate)
+        : 0,
+    [debouncedStartDate, debouncedEndDate]
+  );
+
+  const totalEstimatedBudget = useMemo(
+    () => (estimatedBudget ? sumBudget(estimatedBudget) : 0),
+    [estimatedBudget]
+  );
 
   useEffect(() => {
     if (editingTrip) {
@@ -68,8 +84,8 @@ export const CreateTripPage: React.FC = () => {
 
   useEffect(() => {
     if (debouncedStartDate && debouncedEndDate && debouncedTravelers > 0) {
-      const days = calculateDays(debouncedStartDate, debouncedEndDate);
-      const budget = calculateBudgetEstimate(days, debouncedTravelers, debouncedBudgetLevel);
+      const calculatedDays = calculateDays(debouncedStartDate, debouncedEndDate);
+      const budget = calculateBudgetEstimate(calculatedDays, debouncedTravelers, debouncedBudgetLevel);
       setEstimatedBudget(budget);
     }
   }, [debouncedStartDate, debouncedEndDate, debouncedTravelers, debouncedBudgetLevel]);
@@ -84,8 +100,15 @@ export const CreateTripPage: React.FC = () => {
         };
       });
     },
-    150,
+    BUDGET_INPUT_DEBOUNCE_MS,
     { leading: false, trailing: true }
+  );
+
+  const handleFormChange = useCallback(
+    <K extends keyof FormData>(field: K, value: FormData[K]) => {
+      setFormData((prev) => ({ ...prev, [field]: value }));
+    },
+    []
   );
 
   const handleBudgetChange = useCallback(
@@ -96,7 +119,7 @@ export const CreateTripPage: React.FC = () => {
     [estimatedBudget, debouncedSetBudgetCategory]
   );
 
-  const validateStep1 = () => {
+  const validateStep1 = useCallback(() => {
     const newErrors: Record<string, string> = {};
     if (!formData.destination.trim()) {
       newErrors.destination = '请输入目的地';
@@ -115,15 +138,19 @@ export const CreateTripPage: React.FC = () => {
     }
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
-  };
+  }, [formData]);
 
-  const handleNext = () => {
+  const handleNext = useCallback(() => {
     if (step === 1 && validateStep1()) {
       setStep(2);
     }
-  };
+  }, [step, validateStep1]);
 
-  const handleSubmit = () => {
+  const handlePrev = useCallback(() => {
+    setStep(1);
+  }, []);
+
+  const handleSubmit = useCallback(() => {
     if (!estimatedBudget) return;
 
     if (editId) {
@@ -134,15 +161,11 @@ export const CreateTripPage: React.FC = () => {
       const newTrip = addTrip(formData);
       navigate(`/trip/${newTrip.id}/budget`);
     }
-  };
+  }, [estimatedBudget, editId, formData, addTrip, updateTrip, updateEstimatedBudget, navigate]);
 
-  const days = useMemo(
-    () =>
-      debouncedStartDate && debouncedEndDate
-        ? calculateDays(debouncedStartDate, debouncedEndDate)
-        : 0,
-    [debouncedStartDate, debouncedEndDate]
-  );
+  const handleBack = useCallback(() => {
+    navigate('/');
+  }, [navigate]);
 
   return (
     <Layout>
@@ -150,7 +173,7 @@ export const CreateTripPage: React.FC = () => {
         <Button
           variant="ghost"
           leftIcon={<ArrowLeft size={18} />}
-          onClick={() => navigate('/')}
+          onClick={handleBack}
           className="mb-6"
         >
           返回
@@ -205,7 +228,7 @@ export const CreateTripPage: React.FC = () => {
                 placeholder="例如：云南大理、日本东京"
                 value={formData.destination}
                 onChange={(e) =>
-                  setFormData({ ...formData, destination: e.target.value })
+                  handleFormChange('destination', e.target.value)
                 }
                 error={errors.destination}
                 leftIcon={<MapPin size={18} />}
@@ -218,7 +241,7 @@ export const CreateTripPage: React.FC = () => {
                   value={formData.startDate}
                   min={getTodayString()}
                   onChange={(e) =>
-                    setFormData({ ...formData, startDate: e.target.value })
+                    handleFormChange('startDate', e.target.value)
                   }
                   error={errors.startDate}
                   leftIcon={<Calendar size={18} />}
@@ -229,7 +252,7 @@ export const CreateTripPage: React.FC = () => {
                   value={formData.endDate}
                   min={formData.startDate || getTodayString()}
                   onChange={(e) =>
-                    setFormData({ ...formData, endDate: e.target.value })
+                    handleFormChange('endDate', e.target.value)
                   }
                   error={errors.endDate}
                   leftIcon={<Calendar size={18} />}
@@ -254,10 +277,7 @@ export const CreateTripPage: React.FC = () => {
                   max="20"
                   value={formData.travelers}
                   onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      travelers: parseInt(e.target.value) || 1,
-                    })
+                    handleFormChange('travelers', parseInt(e.target.value) || 1)
                   }
                   error={errors.travelers}
                   leftIcon={<Users size={18} />}
@@ -266,10 +286,7 @@ export const CreateTripPage: React.FC = () => {
                   label="预算级别"
                   value={formData.budgetLevel}
                   onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      budgetLevel: e.target.value as BudgetLevel,
-                    })
+                    handleFormChange('budgetLevel', e.target.value as BudgetLevel)
                   }
                   options={[
                     { value: 'economy', label: budgetLevelLabels.economy },
@@ -289,7 +306,7 @@ export const CreateTripPage: React.FC = () => {
                     </Badge>
                   </div>
                   <p className="text-3xl font-bold text-primary-600 font-display">
-                    {formatCurrency(sumBudget(estimatedBudget))}
+                    {formatCurrency(totalEstimatedBudget)}
                   </p>
                   <p className="text-sm text-gray-500 mt-1">
                     系统根据您的选择自动估算，下一步可手动调整
@@ -321,7 +338,7 @@ export const CreateTripPage: React.FC = () => {
               <div className="bg-gradient-to-r from-primary-500 to-accent-500 rounded-xl p-5 text-white mb-6">
                 <p className="text-white/80 text-sm">预估总预算</p>
                 <p className="text-4xl font-bold font-display mt-1">
-                  {estimatedBudget ? formatCurrency(sumBudget(estimatedBudget)) : '¥0'}
+                  {estimatedBudget ? formatCurrency(totalEstimatedBudget) : '¥0'}
                 </p>
               </div>
 
@@ -356,7 +373,7 @@ export const CreateTripPage: React.FC = () => {
               )}
 
               <div className="flex gap-4 pt-4">
-                <Button variant="secondary" onClick={() => setStep(1)} fullWidth>
+                <Button variant="secondary" onClick={handlePrev} fullWidth>
                   上一步
                 </Button>
                 <Button onClick={handleSubmit} fullWidth>

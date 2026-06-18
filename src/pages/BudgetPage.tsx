@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { Plus, Trash2, Edit2, PiggyBank, TrendingUp, AlertTriangle } from 'lucide-react';
 import { Layout } from '@/components/layout/Layout';
@@ -12,8 +12,21 @@ import { BudgetComparisonChart, ExpensePieChart } from '@/components/charts/Budg
 import { useTripStore } from '@/store/tripStore';
 import { sumBudget, formatCurrency, getBudgetStatus } from '@/utils/budgetCalculator';
 import { getTodayString, formatDateShort } from '@/utils/dateUtils';
+import { useThrottle } from '@/hooks/useDebounce';
 import type { ExpenseCategory, Expense } from '@/types';
 import { categoryLabels, categoryColors } from '@/types';
+
+const CHART_THROTTLE_MS = 250;
+const FORM_DEBOUNCE_MS = 150;
+
+const CATEGORY_INITIAL: Record<ExpenseCategory, number> = {
+  transportation: 0,
+  accommodation: 0,
+  food: 0,
+  tickets: 0,
+  shopping: 0,
+  other: 0,
+};
 
 export const BudgetPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -43,6 +56,16 @@ export const BudgetPage: React.FC = () => {
     note: '',
   });
 
+  const handleFormChange = useCallback(
+    <K extends keyof typeof formData>(field: K, value: typeof formData[K]) => {
+      setFormData((prev) => ({ ...prev, [field]: value }));
+    },
+    []
+  );
+
+  const throttledExpenses = useThrottle(expenses, CHART_THROTTLE_MS);
+  const throttledFilterCategory = useThrottle(filterCategory, CHART_THROTTLE_MS);
+
   if (!trip) {
     return (
       <Layout>
@@ -54,34 +77,33 @@ export const BudgetPage: React.FC = () => {
   }
 
   const totalBudget = sumBudget(trip.estimatedBudget);
-  const totalSpent = expenses.reduce((sum, e) => sum + e.amount, 0);
+  const totalSpent = useMemo(
+    () => throttledExpenses.reduce((sum, e) => sum + e.amount, 0),
+    [throttledExpenses]
+  );
   const remaining = totalBudget - totalSpent;
-  const budgetStatus = getBudgetStatus(totalBudget, totalSpent);
+  const budgetStatus = useMemo(
+    () => getBudgetStatus(totalBudget, totalSpent),
+    [totalBudget, totalSpent]
+  );
 
   const actualExpensesByCategory = useMemo(() => {
-    const result: Record<ExpenseCategory, number> = {
-      transportation: 0,
-      accommodation: 0,
-      food: 0,
-      tickets: 0,
-      shopping: 0,
-      other: 0,
-    };
-    expenses.forEach((e) => {
+    const result: Record<ExpenseCategory, number> = { ...CATEGORY_INITIAL };
+    throttledExpenses.forEach((e) => {
       result[e.category] += e.amount;
     });
     return result;
-  }, [expenses]);
+  }, [throttledExpenses]);
 
   const filteredExpenses = useMemo(() => {
     let result = [...expenses];
-    if (filterCategory !== 'all') {
-      result = result.filter((e) => e.category === filterCategory);
+    if (throttledFilterCategory !== 'all') {
+      result = result.filter((e) => e.category === throttledFilterCategory);
     }
     return result.sort((a, b) => b.date.localeCompare(a.date));
-  }, [expenses, filterCategory]);
+  }, [expenses, throttledFilterCategory]);
 
-  const handleOpenAddModal = () => {
+  const handleOpenAddModal = useCallback(() => {
     setEditingExpense(null);
     setFormData({
       category: 'transportation',
@@ -91,9 +113,9 @@ export const BudgetPage: React.FC = () => {
       note: '',
     });
     setShowAddModal(true);
-  };
+  }, []);
 
-  const handleEdit = (expense: Expense) => {
+  const handleEdit = useCallback((expense: Expense) => {
     setEditingExpense(expense);
     setFormData({
       category: expense.category,
@@ -103,9 +125,9 @@ export const BudgetPage: React.FC = () => {
       note: expense.note || '',
     });
     setShowAddModal(true);
-  };
+  }, []);
 
-  const handleSubmit = () => {
+  const handleSubmit = useCallback(() => {
     if (!formData.description.trim() || !formData.amount) return;
 
     const amount = parseFloat(formData.amount);
@@ -130,22 +152,22 @@ export const BudgetPage: React.FC = () => {
       });
     }
     setShowAddModal(false);
-  };
+  }, [formData, editingExpense, addExpense, updateExpense, trip.id]);
 
-  const handleDelete = (id: string) => {
+  const handleDelete = useCallback((id: string) => {
     setDeletingExpense(id);
     setShowDeleteModal(true);
-  };
+  }, []);
 
-  const confirmDelete = () => {
+  const confirmDelete = useCallback(() => {
     if (deletingExpense) {
       deleteExpense(deletingExpense);
       setShowDeleteModal(false);
       setDeletingExpense(null);
     }
-  };
+  }, [deletingExpense, deleteExpense]);
 
-  const getBudgetStatusColor = () => {
+  const getBudgetStatusColor = useCallback(() => {
     switch (budgetStatus.status) {
       case 'danger':
         return 'from-red-500 to-red-600';
@@ -154,7 +176,11 @@ export const BudgetPage: React.FC = () => {
       default:
         return 'from-primary-500 to-accent-500';
     }
-  };
+  }, [budgetStatus.status]);
+
+  const handleFilterChange = useCallback((value: string) => {
+    setFilterCategory(value);
+  }, []);
 
   return (
     <Layout>
@@ -272,7 +298,7 @@ export const BudgetPage: React.FC = () => {
             <div className="flex items-center gap-3">
               <Select
                 value={filterCategory}
-                onChange={(e) => setFilterCategory(e.target.value)}
+                onChange={(e) => handleFilterChange(e.target.value)}
                 options={[
                   { value: 'all', label: '全部分类' },
                   ...(Object.keys(categoryLabels) as ExpenseCategory[]).map((cat) => ({
@@ -384,7 +410,7 @@ export const BudgetPage: React.FC = () => {
               placeholder="例如：高铁票、酒店住宿、午餐等"
               value={formData.description}
               onChange={(e) =>
-                setFormData({ ...formData, description: e.target.value })
+                handleFormChange('description', e.target.value)
               }
             />
             <div className="grid grid-cols-2 gap-4">
@@ -396,7 +422,7 @@ export const BudgetPage: React.FC = () => {
                 placeholder="0.00"
                 value={formData.amount}
                 onChange={(e) =>
-                  setFormData({ ...formData, amount: e.target.value })
+                  handleFormChange('amount', e.target.value)
                 }
               />
               <Input
@@ -415,7 +441,7 @@ export const BudgetPage: React.FC = () => {
               placeholder="添加备注信息"
               value={formData.note}
               onChange={(e) =>
-                setFormData({ ...formData, note: e.target.value })
+                handleFormChange('note', e.target.value)
               }
               rows={3}
             />

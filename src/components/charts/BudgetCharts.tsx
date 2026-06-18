@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -28,92 +28,100 @@ ChartJS.register(
   Legend
 );
 
+const CATEGORIES: ExpenseCategory[] = [
+  'transportation',
+  'accommodation',
+  'food',
+  'tickets',
+  'shopping',
+  'other',
+];
+
 interface BudgetComparisonChartProps {
   estimatedBudget: BudgetEstimate;
   actualExpenses: Record<ExpenseCategory, number>;
 }
 
-export const BudgetComparisonChart: React.FC<BudgetComparisonChartProps> = ({
+const BudgetComparisonChartInner: React.FC<BudgetComparisonChartProps> = ({
   estimatedBudget,
   actualExpenses,
 }) => {
-  const categories: ExpenseCategory[] = [
-    'transportation',
-    'accommodation',
-    'food',
-    'tickets',
-    'shopping',
-    'other',
-  ];
+  const chartData = useMemo(() => {
+    const labels = CATEGORIES.map((cat) => categoryLabels[cat]);
+    const estimatedData = CATEGORIES.map((cat) => estimatedBudget[cat]);
+    const actualData = CATEGORIES.map((cat) => actualExpenses[cat] || 0);
 
-  const labels = categories.map((cat) => categoryLabels[cat]);
-  const estimatedData = categories.map((cat) => estimatedBudget[cat]);
-  const actualData = categories.map((cat) => actualExpenses[cat] || 0);
+    return {
+      labels,
+      datasets: [
+        {
+          label: '预算',
+          data: estimatedData,
+          backgroundColor: 'rgba(30, 136, 229, 0.7)',
+          borderColor: 'rgba(30, 136, 229, 1)',
+          borderWidth: 2,
+          borderRadius: 8,
+        },
+        {
+          label: '实际花费',
+          data: actualData,
+          backgroundColor: 'rgba(255, 112, 67, 0.7)',
+          borderColor: 'rgba(255, 112, 67, 1)',
+          borderWidth: 2,
+          borderRadius: 8,
+        },
+      ],
+    };
+  }, [estimatedBudget, actualExpenses]);
 
-  const data = {
-    labels,
-    datasets: [
-      {
-        label: '预算',
-        data: estimatedData,
-        backgroundColor: 'rgba(30, 136, 229, 0.7)',
-        borderColor: 'rgba(30, 136, 229, 1)',
-        borderWidth: 2,
-        borderRadius: 8,
+  const chartOptions = useMemo(
+    () => ({
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: {
+        duration: 300,
       },
-      {
-        label: '实际花费',
-        data: actualData,
-        backgroundColor: 'rgba(255, 112, 67, 0.7)',
-        borderColor: 'rgba(255, 112, 67, 1)',
-        borderWidth: 2,
-        borderRadius: 8,
-      },
-    ],
-  };
-
-  const options = {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: {
-        position: 'top' as const,
-        labels: {
-          usePointStyle: true,
-          padding: 20,
-          font: {
-            size: 12,
+      plugins: {
+        legend: {
+          position: 'top' as const,
+          labels: {
+            usePointStyle: true,
+            padding: 20,
+            font: {
+              size: 12,
+            },
+          },
+        },
+        tooltip: {
+          callbacks: {
+            label: function (context: any) {
+              const value = context.raw;
+              return `${context.dataset.label}: ¥${value.toLocaleString()}`;
+            },
           },
         },
       },
-      tooltip: {
-        callbacks: {
-          label: function (context: any) {
-            const value = context.raw;
-            return `${context.dataset.label}: ¥${value.toLocaleString()}`;
+      scales: {
+        y: {
+          beginAtZero: true,
+          ticks: {
+            callback: function (value: any) {
+              return '¥' + value.toLocaleString();
+            },
+          },
+          grid: {
+            color: 'rgba(0, 0, 0, 0.05)',
+          },
+        },
+        x: {
+          grid: {
+            display: false,
           },
         },
       },
-    },
-    scales: {
-      y: {
-        beginAtZero: true,
-        ticks: {
-          callback: function (value: any) {
-            return '¥' + value.toLocaleString();
-          },
-        },
-        grid: {
-          color: 'rgba(0, 0, 0, 0.05)',
-        },
-      },
-      x: {
-        grid: {
-          display: false,
-        },
-      },
-    },
-  };
+    }),
+    []
+  );
 
   return (
     <Card>
@@ -122,70 +130,80 @@ export const BudgetComparisonChart: React.FC<BudgetComparisonChartProps> = ({
       </CardHeader>
       <CardContent>
         <div className="h-80">
-          <Bar data={data} options={options} />
+          <Bar data={chartData} options={chartOptions} />
         </div>
       </CardContent>
     </Card>
   );
 };
 
+export const BudgetComparisonChart = React.memo(BudgetComparisonChartInner);
+
 interface ExpensePieChartProps {
   expenses: Record<ExpenseCategory, number>;
 }
 
-export const ExpensePieChart: React.FC<ExpensePieChartProps> = ({
-  expenses,
-}) => {
-  const categories = Object.entries(expenses)
-    .filter(([, value]) => value > 0)
-    .map(([key]) => key as ExpenseCategory);
+const ExpensePieChartInner: React.FC<ExpensePieChartProps> = ({ expenses }) => {
+  const chartData = useMemo(() => {
+    const categories = Object.entries(expenses)
+      .filter(([, value]) => value > 0)
+      .map(([key]) => key as ExpenseCategory);
 
-  const labels = categories.map((cat) => categoryLabels[cat]);
-  const data = categories.map((cat) => expenses[cat]);
-  const colors = categories.map((cat) => categoryColors[cat]);
+    const labels = categories.map((cat) => categoryLabels[cat]);
+    const data = categories.map((cat) => expenses[cat]);
+    const colors = categories.map((cat) => categoryColors[cat]);
 
-  const chartData = {
-    labels,
-    datasets: [
-      {
-        data,
-        backgroundColor: colors.map((c) => c + 'CC'),
-        borderColor: colors,
-        borderWidth: 2,
+    return {
+      labels,
+      datasets: [
+        {
+          data,
+          backgroundColor: colors.map((c) => c + 'CC'),
+          borderColor: colors,
+          borderWidth: 2,
+        },
+      ],
+    };
+  }, [expenses]);
+
+  const chartOptions = useMemo(
+    () => ({
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: {
+        duration: 300,
       },
-    ],
-  };
-
-  const options = {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: {
-        position: 'right' as const,
-        labels: {
-          usePointStyle: true,
-          padding: 20,
-          font: {
-            size: 12,
+      plugins: {
+        legend: {
+          position: 'right' as const,
+          labels: {
+            usePointStyle: true,
+            padding: 20,
+            font: {
+              size: 12,
+            },
+          },
+        },
+        tooltip: {
+          callbacks: {
+            label: function (context: any) {
+              const total = context.dataset.data.reduce(
+                (a: number, b: number) => a + b,
+                0
+              );
+              const percentage = ((context.raw / total) * 100).toFixed(1);
+              return `${context.label}: ¥${context.raw.toLocaleString()} (${percentage}%)`;
+            },
           },
         },
       },
-      tooltip: {
-        callbacks: {
-          label: function (context: any) {
-            const total = context.dataset.data.reduce(
-              (a: number, b: number) => a + b,
-              0
-            );
-            const percentage = ((context.raw / total) * 100).toFixed(1);
-            return `${context.label}: ¥${context.raw.toLocaleString()} (${percentage}%)`;
-          },
-        },
-      },
-    },
-  };
+    }),
+    []
+  );
 
-  if (categories.length === 0) {
+  const hasData = Object.values(expenses).some((v) => v > 0);
+
+  if (!hasData) {
     return (
       <Card>
         <CardHeader>
@@ -207,9 +225,11 @@ export const ExpensePieChart: React.FC<ExpensePieChartProps> = ({
       </CardHeader>
       <CardContent>
         <div className="h-80">
-          <Pie data={chartData} options={options} />
+          <Pie data={chartData} options={chartOptions} />
         </div>
       </CardContent>
     </Card>
   );
 };
+
+export const ExpensePieChart = React.memo(ExpensePieChartInner);

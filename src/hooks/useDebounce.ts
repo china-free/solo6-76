@@ -86,3 +86,102 @@ export function useDebouncedCallback<T extends (...args: any[]) => any>(
 
   return debounced;
 }
+
+export function useThrottle<T>(value: T, limit: number = 200): T {
+  const [throttledValue, setThrottledValue] = useState<T>(value);
+  const lastRunRef = useRef<number>(0);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    const now = Date.now();
+    const timeSinceLastRun = now - lastRunRef.current;
+
+    if (timeSinceLastRun >= limit) {
+      lastRunRef.current = now;
+      setThrottledValue(value);
+    } else {
+      if (timerRef.current !== null) {
+        clearTimeout(timerRef.current);
+      }
+      timerRef.current = setTimeout(() => {
+        lastRunRef.current = Date.now();
+        setThrottledValue(value);
+      }, limit - timeSinceLastRun);
+    }
+
+    return () => {
+      if (timerRef.current !== null) {
+        clearTimeout(timerRef.current);
+      }
+    };
+  }, [value, limit]);
+
+  return throttledValue;
+}
+
+interface ThrottledCallbackOptions {
+  leading?: boolean;
+  trailing?: boolean;
+}
+
+export function useThrottledCallback<T extends (...args: any[]) => any>(
+  callback: T,
+  limit: number = 200,
+  options: ThrottledCallbackOptions = {}
+): (...args: Parameters<T>) => void {
+  const { leading = true, trailing = true } = options;
+  const callbackRef = useRef(callback);
+  const lastRunRef = useRef<number>(0);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastArgsRef = useRef<Parameters<T> | null>(null);
+
+  useEffect(() => {
+    callbackRef.current = callback;
+  }, [callback]);
+
+  const invoke = useCallback((args: Parameters<T>) => {
+    lastRunRef.current = Date.now();
+    callbackRef.current(...args);
+  }, []);
+
+  const throttled = useCallback(
+    (...args: Parameters<T>) => {
+      const now = Date.now();
+      const timeSinceLastRun = now - lastRunRef.current;
+
+      lastArgsRef.current = args;
+
+      if (timeSinceLastRun >= limit) {
+        if (leading) {
+          invoke(args);
+        } else {
+          lastRunRef.current = now;
+        }
+
+        if (timerRef.current !== null) {
+          clearTimeout(timerRef.current);
+          timerRef.current = null;
+        }
+      } else if (trailing && timerRef.current === null) {
+        timerRef.current = setTimeout(() => {
+          if (lastArgsRef.current) {
+            invoke(lastArgsRef.current);
+          }
+          timerRef.current = null;
+          lastArgsRef.current = null;
+        }, limit - timeSinceLastRun);
+      }
+    },
+    [limit, leading, trailing, invoke]
+  );
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current !== null) {
+        clearTimeout(timerRef.current);
+      }
+    };
+  }, []);
+
+  return throttled;
+}

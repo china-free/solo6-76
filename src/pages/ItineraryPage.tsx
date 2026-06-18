@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, memo } from 'react';
 import { useParams } from 'react-router-dom';
 import { Plus, Trash2, Edit2, Clock, MapPin, CalendarDays, GripVertical } from 'lucide-react';
 import { Layout } from '@/components/layout/Layout';
@@ -12,6 +12,96 @@ import { getDateRange, formatDateWithWeekday, formatDateShort, getDayOfTrip, get
 import type { Activity, ActivityType } from '@/types';
 import { activityTypeLabels, activityTypeColors } from '@/types';
 import { useDebounce } from '@/hooks/useDebounce';
+
+const DATE_DEBOUNCE_MS = 200;
+
+interface ActivityItemProps {
+  activity: Activity;
+  onEdit: (activity: Activity) => void;
+  onDelete: (id: string) => void;
+  index: number;
+}
+
+const ActivityItem = memo(({ activity, onEdit, onDelete, index }: ActivityItemProps) => {
+  return (
+    <div
+      key={activity.id}
+      className="relative pl-14 animate-fade-in-up"
+      style={{ animationDelay: `${index * 0.1}s` }}
+    >
+      <div
+        className="absolute left-0 w-12 h-12 rounded-full flex items-center justify-center border-4 border-white shadow-md"
+        style={{ backgroundColor: activityTypeColors[activity.type] }}
+      >
+        <Clock size={18} className="text-white" />
+      </div>
+
+      <Card className="p-5 hover:shadow-lg transition-all">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex-1">
+            <div className="flex items-center gap-3 mb-2">
+              <span className="text-sm font-semibold text-primary-600 bg-primary-50 px-3 py-1 rounded-full">
+                {activity.time}
+              </span>
+              <span
+                className="text-xs font-medium px-2.5 py-0.5 rounded-full"
+                style={{
+                  backgroundColor: activityTypeColors[activity.type] + '20',
+                  color: activityTypeColors[activity.type],
+                }}
+              >
+                {activityTypeLabels[activity.type]}
+              </span>
+            </div>
+
+            <h4 className="text-lg font-semibold text-gray-800 mb-1">
+              {activity.title}
+            </h4>
+
+            {activity.location && (
+              <div className="flex items-center gap-1.5 text-sm text-gray-500 mb-2">
+                <MapPin size={14} />
+                <span>{activity.location}</span>
+              </div>
+            )}
+
+            {activity.description && (
+              <p className="text-gray-600 text-sm mb-2">
+                {activity.description}
+              </p>
+            )}
+
+            {activity.note && (
+              <p className="text-xs text-gray-400 bg-gray-50 rounded-lg px-3 py-2">
+                💡 {activity.note}
+              </p>
+            )}
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <button className="btn-icon text-gray-300 cursor-grab hover:text-gray-400">
+              <GripVertical size={16} />
+            </button>
+            <button
+              onClick={() => onEdit(activity)}
+              className="btn-icon text-gray-400 hover:text-primary-500"
+            >
+              <Edit2 size={16} />
+            </button>
+            <button
+              onClick={() => onDelete(activity.id)}
+              className="btn-icon text-gray-400 hover:text-red-500"
+            >
+              <Trash2 size={16} />
+            </button>
+          </div>
+        </div>
+      </Card>
+    </div>
+  );
+});
+
+ActivityItem.displayName = 'ActivityItem';
 
 export const ItineraryPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -38,11 +128,7 @@ export const ItineraryPage: React.FC = () => {
     note: '',
   });
 
-  const debouncedSelectedDate = useDebounce(selectedDate, 200);
-
-  const handleDateChange = useCallback((date: string) => {
-    setSelectedDate(date);
-  }, []);
+  const debouncedSelectedDate = useDebounce(selectedDate, DATE_DEBOUNCE_MS);
 
   const dates = useMemo(
     () => (trip ? getDateRange(trip.startDate, trip.endDate) : []),
@@ -72,17 +158,18 @@ export const ItineraryPage: React.FC = () => {
     [allActivities, id]
   );
 
-  if (!trip) {
-    return (
-      <Layout>
-        <div className="text-center py-20 text-gray-500">
-          未找到该旅行计划
-        </div>
-      </Layout>
-    );
-  }
+  const handleDateChange = useCallback((date: string) => {
+    setSelectedDate(date);
+  }, []);
 
-  const handleOpenAddModal = () => {
+  const handleFormChange = useCallback(
+    <K extends keyof typeof formData>(field: K, value: typeof formData[K]) => {
+      setFormData((prev) => ({ ...prev, [field]: value }));
+    },
+    []
+  );
+
+  const handleOpenAddModal = useCallback(() => {
     setEditingActivity(null);
     setFormData({
       time: getCurrentTimeString(),
@@ -93,9 +180,9 @@ export const ItineraryPage: React.FC = () => {
       note: '',
     });
     setShowAddModal(true);
-  };
+  }, []);
 
-  const handleEdit = (activity: Activity) => {
+  const handleEdit = useCallback((activity: Activity) => {
     setEditingActivity(activity);
     setFormData({
       time: activity.time,
@@ -106,9 +193,9 @@ export const ItineraryPage: React.FC = () => {
       note: activity.note || '',
     });
     setShowAddModal(true);
-  };
+  }, []);
 
-  const handleSubmit = () => {
+  const handleSubmit = useCallback(() => {
     if (!formData.title.trim() || !selectedDate) return;
 
     if (editingActivity) {
@@ -123,7 +210,7 @@ export const ItineraryPage: React.FC = () => {
       });
     } else {
       addActivity({
-        tripId: trip.id,
+        tripId: trip?.id || '',
         date: selectedDate,
         time: formData.time,
         location: formData.location,
@@ -134,20 +221,39 @@ export const ItineraryPage: React.FC = () => {
       });
     }
     setShowAddModal(false);
-  };
+  }, [formData, selectedDate, editingActivity, updateActivity, addActivity, trip]);
 
-  const handleDelete = (id: string) => {
+  const handleDelete = useCallback((id: string) => {
     setDeletingActivity(id);
     setShowDeleteModal(true);
-  };
+  }, []);
 
-  const confirmDelete = () => {
+  const handleCloseAddModal = useCallback(() => {
+    setShowAddModal(false);
+  }, []);
+
+  const handleCloseDeleteModal = useCallback(() => {
+    setShowDeleteModal(false);
+    setDeletingActivity(null);
+  }, []);
+
+  const confirmDelete = useCallback(() => {
     if (deletingActivity) {
       deleteActivity(deletingActivity);
       setShowDeleteModal(false);
       setDeletingActivity(null);
     }
-  };
+  }, [deletingActivity, deleteActivity]);
+
+  if (!trip) {
+    return (
+      <Layout>
+        <div className="text-center py-20 text-gray-500">
+          未找到该旅行计划
+        </div>
+      </Layout>
+    );
+  }
 
   return (
     <Layout>
@@ -237,80 +343,13 @@ export const ItineraryPage: React.FC = () => {
 
                 <div className="space-y-4">
                   {activities.map((activity, index) => (
-                    <div
+                    <ActivityItem
                       key={activity.id}
-                      className="relative pl-14 animate-fade-in-up"
-                      style={{ animationDelay: `${index * 0.1}s` }}
-                    >
-                      <div
-                        className="absolute left-0 w-12 h-12 rounded-full flex items-center justify-center border-4 border-white shadow-md"
-                        style={{ backgroundColor: activityTypeColors[activity.type] }}
-                      >
-                        <Clock size={18} className="text-white" />
-                      </div>
-
-                      <Card className="p-5 hover:shadow-lg transition-all">
-                        <div className="flex items-start justify-between gap-4">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-3 mb-2">
-                              <span className="text-sm font-semibold text-primary-600 bg-primary-50 px-3 py-1 rounded-full">
-                                {activity.time}
-                              </span>
-                              <span
-                                className="text-xs font-medium px-2.5 py-0.5 rounded-full"
-                                style={{
-                                  backgroundColor: activityTypeColors[activity.type] + '20',
-                                  color: activityTypeColors[activity.type],
-                                }}
-                              >
-                                {activityTypeLabels[activity.type]}
-                              </span>
-                            </div>
-
-                            <h4 className="text-lg font-semibold text-gray-800 mb-1">
-                              {activity.title}
-                            </h4>
-
-                            {activity.location && (
-                              <div className="flex items-center gap-1.5 text-sm text-gray-500 mb-2">
-                                <MapPin size={14} />
-                                <span>{activity.location}</span>
-                              </div>
-                            )}
-
-                            {activity.description && (
-                              <p className="text-gray-600 text-sm mb-2">
-                                {activity.description}
-                              </p>
-                            )}
-
-                            {activity.note && (
-                              <p className="text-xs text-gray-400 bg-gray-50 rounded-lg px-3 py-2">
-                                💡 {activity.note}
-                              </p>
-                            )}
-                          </div>
-
-                          <div className="flex flex-col gap-1">
-                            <button className="btn-icon text-gray-300 cursor-grab hover:text-gray-400">
-                              <GripVertical size={16} />
-                            </button>
-                            <button
-                              onClick={() => handleEdit(activity)}
-                              className="btn-icon text-gray-400 hover:text-primary-500"
-                            >
-                              <Edit2 size={16} />
-                            </button>
-                            <button
-                              onClick={() => handleDelete(activity.id)}
-                              className="btn-icon text-gray-400 hover:text-red-500"
-                            >
-                              <Trash2 size={16} />
-                            </button>
-                          </div>
-                        </div>
-                      </Card>
-                    </div>
+                      activity={activity}
+                      onEdit={handleEdit}
+                      onDelete={handleDelete}
+                      index={index}
+                    />
                   ))}
                 </div>
               </div>
@@ -320,12 +359,12 @@ export const ItineraryPage: React.FC = () => {
 
         <Modal
           isOpen={showAddModal}
-          onClose={() => setShowAddModal(false)}
+          onClose={handleCloseAddModal}
           title={editingActivity ? '编辑活动' : '添加活动'}
           size="md"
           footer={
             <>
-              <Button variant="secondary" onClick={() => setShowAddModal(false)}>
+              <Button variant="secondary" onClick={handleCloseAddModal}>
                 取消
               </Button>
               <Button onClick={handleSubmit}>
@@ -341,17 +380,14 @@ export const ItineraryPage: React.FC = () => {
                 type="time"
                 value={formData.time}
                 onChange={(e) =>
-                  setFormData({ ...formData, time: e.target.value })
+                  handleFormChange('time', e.target.value)
                 }
               />
               <Select
                 label="活动类型"
                 value={formData.type}
                 onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    type: e.target.value as ActivityType,
-                  })
+                  handleFormChange('type', e.target.value as ActivityType)
                 }
                 options={(Object.keys(activityTypeLabels) as ActivityType[]).map(
                   (type) => ({
@@ -366,7 +402,7 @@ export const ItineraryPage: React.FC = () => {
               placeholder="例如：游览故宫、午餐、乘坐高铁等"
               value={formData.title}
               onChange={(e) =>
-                setFormData({ ...formData, title: e.target.value })
+                handleFormChange('title', e.target.value)
               }
             />
             <Input
@@ -375,7 +411,7 @@ export const ItineraryPage: React.FC = () => {
               leftIcon={<MapPin size={16} />}
               value={formData.location}
               onChange={(e) =>
-                setFormData({ ...formData, location: e.target.value })
+                handleFormChange('location', e.target.value)
               }
             />
             <Textarea
@@ -383,7 +419,7 @@ export const ItineraryPage: React.FC = () => {
               placeholder="描述活动的详细内容"
               value={formData.description}
               onChange={(e) =>
-                setFormData({ ...formData, description: e.target.value })
+                handleFormChange('description', e.target.value)
               }
               rows={3}
             />
@@ -392,7 +428,7 @@ export const ItineraryPage: React.FC = () => {
               placeholder="添加注意事项或提醒"
               value={formData.note}
               onChange={(e) =>
-                setFormData({ ...formData, note: e.target.value })
+                handleFormChange('note', e.target.value)
               }
               rows={2}
             />
@@ -401,10 +437,7 @@ export const ItineraryPage: React.FC = () => {
 
         <ConfirmModal
           isOpen={showDeleteModal}
-          onClose={() => {
-            setShowDeleteModal(false);
-            setDeletingActivity(null);
-          }}
+          onClose={handleCloseDeleteModal}
           onConfirm={confirmDelete}
           title="删除活动"
           description="确定要删除这个活动吗？此操作无法撤销。"
