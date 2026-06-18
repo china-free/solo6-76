@@ -11,6 +11,7 @@ import { useTripStore } from '@/store/tripStore';
 import { getDateRange, formatDateWithWeekday, formatDateShort, getDayOfTrip, getCurrentTimeString } from '@/utils/dateUtils';
 import type { Activity, ActivityType } from '@/types';
 import { activityTypeLabels, activityTypeColors } from '@/types';
+import { useDebounce } from '@/hooks/useDebounce';
 
 export const ItineraryPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -37,6 +38,12 @@ export const ItineraryPage: React.FC = () => {
     note: '',
   });
 
+  const debouncedSelectedDate = useDebounce(selectedDate, 200);
+
+  const handleDateChange = useCallback((date: string) => {
+    setSelectedDate(date);
+  }, []);
+
   const dates = useMemo(
     () => (trip ? getDateRange(trip.startDate, trip.endDate) : []),
     [trip]
@@ -49,11 +56,11 @@ export const ItineraryPage: React.FC = () => {
   }, [selectedDate, dates]);
 
   const activities = useMemo(() => {
-    if (!selectedDate || !id) return [];
+    if (!debouncedSelectedDate || !id) return [];
     return allActivities
-      .filter((a) => a.tripId === id && a.date === selectedDate)
+      .filter((a) => a.tripId === id && a.date === debouncedSelectedDate)
       .sort((a, b) => a.sortOrder - b.sortOrder);
-  }, [allActivities, id, selectedDate]);
+  }, [allActivities, id, debouncedSelectedDate]);
 
   const getActivitiesByDate = useCallback(
     (date: string) => {
@@ -156,7 +163,7 @@ export const ItineraryPage: React.FC = () => {
               return (
                 <button
                   key={date}
-                  onClick={() => setSelectedDate(date)}
+                  onClick={() => handleDateChange(date)}
                   className={`shrink-0 px-5 py-4 rounded-2xl transition-all duration-300 text-left min-w-[140px] ${
                     isSelected
                       ? 'bg-primary-500 text-white shadow-lg shadow-primary-200'

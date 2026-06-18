@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, MapPin, Calendar, Users, Wallet, Sparkles } from 'lucide-react';
 import { Layout } from '@/components/layout/Layout';
@@ -12,6 +12,7 @@ import { calculateBudgetEstimate, calculateDays, sumBudget, formatCurrency } fro
 import { budgetLevelLabels, categoryLabels } from '@/types';
 import type { BudgetLevel, BudgetEstimate } from '@/types';
 import { getTodayString } from '@/utils/dateUtils';
+import { useDebounce, useDebouncedCallback } from '@/hooks/useDebounce';
 
 interface FormData {
   destination: string;
@@ -47,6 +48,11 @@ export const CreateTripPage: React.FC = () => {
   const [estimatedBudget, setEstimatedBudget] = useState<BudgetEstimate | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
+  const debouncedStartDate = useDebounce(formData.startDate, 300);
+  const debouncedEndDate = useDebounce(formData.endDate, 300);
+  const debouncedTravelers = useDebounce(formData.travelers, 300);
+  const debouncedBudgetLevel = useDebounce(formData.budgetLevel, 300);
+
   useEffect(() => {
     if (editingTrip) {
       setFormData({
@@ -61,12 +67,34 @@ export const CreateTripPage: React.FC = () => {
   }, [editingTrip]);
 
   useEffect(() => {
-    if (formData.startDate && formData.endDate && formData.travelers > 0) {
-      const days = calculateDays(formData.startDate, formData.endDate);
-      const budget = calculateBudgetEstimate(days, formData.travelers, formData.budgetLevel);
+    if (debouncedStartDate && debouncedEndDate && debouncedTravelers > 0) {
+      const days = calculateDays(debouncedStartDate, debouncedEndDate);
+      const budget = calculateBudgetEstimate(days, debouncedTravelers, debouncedBudgetLevel);
       setEstimatedBudget(budget);
     }
-  }, [formData.startDate, formData.endDate, formData.travelers, formData.budgetLevel]);
+  }, [debouncedStartDate, debouncedEndDate, debouncedTravelers, debouncedBudgetLevel]);
+
+  const debouncedSetBudgetCategory = useDebouncedCallback(
+    (category: keyof BudgetEstimate, value: number) => {
+      setEstimatedBudget((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          [category]: Math.max(0, value),
+        };
+      });
+    },
+    150,
+    { leading: false, trailing: true }
+  );
+
+  const handleBudgetChange = useCallback(
+    (category: keyof BudgetEstimate, value: number) => {
+      if (!estimatedBudget) return;
+      debouncedSetBudgetCategory(category, value);
+    },
+    [estimatedBudget, debouncedSetBudgetCategory]
+  );
 
   const validateStep1 = () => {
     const newErrors: Record<string, string> = {};
@@ -108,17 +136,13 @@ export const CreateTripPage: React.FC = () => {
     }
   };
 
-  const handleBudgetChange = (category: keyof BudgetEstimate, value: number) => {
-    if (!estimatedBudget) return;
-    setEstimatedBudget({
-      ...estimatedBudget,
-      [category]: Math.max(0, value),
-    });
-  };
-
-  const days = formData.startDate && formData.endDate
-    ? calculateDays(formData.startDate, formData.endDate)
-    : 0;
+  const days = useMemo(
+    () =>
+      debouncedStartDate && debouncedEndDate
+        ? calculateDays(debouncedStartDate, debouncedEndDate)
+        : 0,
+    [debouncedStartDate, debouncedEndDate]
+  );
 
   return (
     <Layout>
